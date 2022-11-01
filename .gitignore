@@ -1,3 +1,15 @@
+# General
+*.swp
+*.swo
+*.rbo
+*.gem
+.DS_Store
+.rbenv-version
+.rbx/
+xcuserdata
+project.xcworkspace
+DerivedData
+/concatenated.*
 .svn/*
 build/*
 English.lproj/.svn/all-wcprops
