@@ -44,6 +44,7 @@ NSString * const MVMetaDataAttributeName          = @"MVMetaDataAttribute";
 NSString * const MVLayoutUserInfoKey              = @"MVLayoutUserInfoKey";
 NSString * const MVNodeUserInfoKey                = @"MVNodeUserInfoKey";
 NSString * const MVStatusUserInfoKey              = @"MVStatusUserInfoKey";
+NSString * const MVStatusPenddingKey              = @"MVStatusPenddingKey";
 
 NSString * const MVDataTreeWillChangeNotification = @"MVDataTreeWillChangeNotification";
 NSString * const MVDataTreeDidChangeNotification  = @"MVDataTreeDidChangeNotification";
@@ -52,6 +53,7 @@ NSString * const MVDataTableChangedNotification   = @"MVDataTableChanged";
 NSString * const MVThreadStateChangedNotification = @"MVThreadStateChanged";
 
 NSString * const MVStatusTaskStarted              = @"MVStatusTaskStarted";
+NSString * const MVStatusTaskPendding             = @"MVStatusTaskPendding";
 NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
 
 //============================================================================
@@ -163,17 +165,8 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
 //-----------------------------------------------------------------------------
 - (void)writeString:(NSString *)str toFile:(FILE *)pFile
 {
-    if(str){
-        const char *s = [str cStringUsingEncoding:[NSString defaultCStringEncoding]];
-        const char *s1 = [str cStringUsingEncoding:NSUTF8StringEncoding];
-        char *s2 = NULL;
-//        if (strcmp(s, s2) == 0) {
-        if(s == NULL) {
-            fwrite(s1, [str length] + 1, 1, pFile);
-        } else {
-            fwrite(s, [str length] + 1, 1, pFile);
-        }
-      
+    if (str) {
+        fwrite(CSTRING(str), [str length] + 1, 1, pFile);
     }
 }
 
@@ -298,10 +291,10 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
     int keyOrdinal = getc(pFile);
     switch (keyOrdinal)
     {
-      case MVUnderlineAttributeOrdinal: [_attributes setObject:[self readStringFromFile:pFile] forKey:MVUnderlineAttributeName]; break;
-      case MVCellColorAttributeOrdinal: [_attributes setObject:[self readColorFromFile:pFile] forKey:MVCellColorAttributeName]; break;
-      case MVTextColorAttributeOrdinal: [_attributes setObject:[self readColorFromFile:pFile] forKey:MVTextColorAttributeName]; break;
-      case MVMetaDataAttributeOrdinal:  [_attributes setObject:[self readStringFromFile:pFile] forKey:MVMetaDataAttributeName]; break;
+        case MVUnderlineAttributeOrdinal: [_attributes setObject:[self readStringFromFile:pFile] ?: @"" forKey:MVUnderlineAttributeName]; break;
+        case MVCellColorAttributeOrdinal: [_attributes setObject:[self readColorFromFile:pFile] ?: @"" forKey:MVCellColorAttributeName]; break;
+        case MVTextColorAttributeOrdinal: [_attributes setObject:[self readColorFromFile:pFile] ?: @"" forKey:MVTextColorAttributeName]; break;
+        case MVMetaDataAttributeOrdinal:  [_attributes setObject:[self readStringFromFile:pFile] ?: @"" forKey:MVMetaDataAttributeName]; break;
       default: NSLog(@"warning: unknown attribute key");
     }
   }
@@ -642,23 +635,29 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
   }
   else
   {
-    NSPredicate *predicate = [NSPredicate
-                              predicateWithFormat:@"self contains[cd] %@", filter];
-
-    displayRows = [[NSMutableArray alloc] init];
-    for (MVRow * row in rows)
-    {
-      if (row.coloumns == nil)
-      {
-        [row loadFromFile:swapFile];
-      }
+      NSString *format = [NSString stringWithFormat:@"*%@*",filter];
     
-      NSString * metadata = [row.attributes objectForKey:MVMetaDataAttributeName];
-      if (metadata == nil || [predicate evaluateWithObject:metadata] == YES)
-      {
-        [displayRows addObject:row];
+      NSPredicate *predicate = [NSPredicate
+                                predicateWithFormat:@"self LIKE [cd] %@", format];
+      displayRows = [[NSMutableArray alloc] init];
+      for (MVRow * row in rows) {
+
+          if (row.coloumns == nil) {
+              [row loadFromFile:swapFile];
+          }
+        
+          NSString *offsetStr = row.coloumns.offsetStr;
+          NSString *dataStr = row.coloumns.dataStr;
+          NSString *descriptionStr = row.coloumns.descriptionStr;
+          NSString *valueStr = row.coloumns.valueStr;
+          
+          if ([predicate evaluateWithObject:offsetStr] == YES ||
+              [predicate evaluateWithObject:dataStr] == YES ||
+              [predicate evaluateWithObject:descriptionStr] == YES ||
+              [predicate evaluateWithObject:valueStr] == YES) {
+              [displayRows addObject:row];
+          }
       }
-    }
   }
   [tableLock unlock];
 }
@@ -1220,6 +1219,18 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
                   userInfo:[NSDictionary dictionaryWithObject:status forKey:MVStatusUserInfoKey]];
 }
 
+- (void)updateStatus: (NSString *)status :statusString
+{
+    NSNotificationCenter * nc = [NSNotificationCenter defaultCenter];
+    [nc postNotificationName:MVThreadStateChangedNotification
+                      object:self
+                    userInfo:
+     @{MVStatusUserInfoKey:status,
+       MVStatusPenddingKey:statusString
+       }];
+}
+
+
 @end
 
 #pragma mark -
@@ -1332,11 +1343,10 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
         }
         fclose(pFile);
 
-          // 引起显示不完全的原因
-//        for (id <MVSerializing> serializable in objectsToSave)
-//        {
-//          [serializable clear];
-//        }
+        for (id <MVSerializing> serializable in objectsToSave)
+        {
+          [serializable clear];
+        }
         
         // reset buffer
         objectsToSave = [[NSMutableArray alloc] init];

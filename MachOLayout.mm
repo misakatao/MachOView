@@ -23,6 +23,11 @@ using namespace std;
 //============================================================================
 @implementation MachOLayout
 
+- (void)dealloc {
+#if DEBUG
+    NSLog(@"MachOLayout----dealloc");
+#endif
+}
 // ----------------------------------------------------------------------------
 - (id)init
 {
@@ -438,7 +443,8 @@ _hex2int(char const * a, uint32_t len)
   MVNode * segmentSplitInfoNode = nil;
   MVNode * functionStartsNode = nil;
   MVNode * dataInCodeEntriesNode = nil;
-  
+  MVNode * stringsNode = nil;
+    
   NSString * lastNodeCaption;
   
   if (symtab_command)
@@ -448,10 +454,10 @@ _hex2int(char const * a, uint32_t len)
                              location:symtab_command->symoff + imageOffset
                                length:symtab_command->nsyms * sizeof(struct nlist)];
     
-    [self createDataNode:rootNode 
-                 caption:@"String Table"
-                location:symtab_command->stroff + imageOffset
-                  length:symtab_command->strsize];
+    stringsNode =  [self createDataNode:rootNode
+                                caption:@"String Table"
+                               location:symtab_command->stroff + imageOffset
+                                 length:symtab_command->strsize];
   }
   
   if (dysymtab_command)
@@ -553,6 +559,16 @@ _hex2int(char const * a, uint32_t len)
     }
   }
   
+    if (stringsNode) {
+        @try {
+            [self createStrings:stringsNode
+                        caption:(lastNodeCaption = @"Strings Parse")
+                       location:stringsNode.dataRange.location
+                         length:stringsNode.dataRange.length];
+        } @catch(NSException * exception) {
+            [self printException:exception caption:lastNodeCaption];
+        }
+    }
   
   //=========== Dynamic Symbol Table =============
   //==============================================
@@ -683,7 +699,8 @@ _hex2int(char const * a, uint32_t len)
       [self createDataInCodeEntriesNode:dataInCodeEntriesNode
                                 caption:(lastNodeCaption = @"Dices")
                                location:dataInCodeEntriesNode.dataRange.location
-                                 length:dataInCodeEntriesNode.dataRange.length];
+                                 length:dataInCodeEntriesNode.dataRange.length
+                                is64Bit:NO];
     }
     @catch(NSException * exception)
     {
@@ -709,7 +726,7 @@ _hex2int(char const * a, uint32_t len)
   uint64_t base_addr;
   uint64_t seg1addr = (uint64_t)-1LL;
   uint64_t segs_read_write_addr = (uint64_t)-1LL;
-  
+
   for (CommandVector::const_iterator cmdIter = commands.begin(); cmdIter != commands.end(); ++cmdIter)
   {
     struct load_command const * load_command = *cmdIter;
@@ -753,6 +770,7 @@ _hex2int(char const * a, uint32_t len)
   MVNode * segmentSplitInfoNode = nil;
   MVNode * functionStartsNode = nil;
   MVNode * dataInCodeEntriesNode = nil;
+  MVNode * stringsNode = nil;
 
   NSString * lastNodeCaption;
   
@@ -763,10 +781,10 @@ _hex2int(char const * a, uint32_t len)
                              location:symtab_command->symoff + imageOffset
                                length:symtab_command->nsyms * sizeof(struct nlist_64)];
     
-    [self createDataNode:rootNode 
-                 caption:@"String Table"
-                location:symtab_command->stroff + imageOffset
-                  length:symtab_command->strsize];
+  stringsNode =  [self createDataNode:rootNode
+                              caption:@"String Table"
+                             location:symtab_command->stroff + imageOffset
+                               length:symtab_command->strsize];
   }
   
   if (dysymtab_command)
@@ -868,6 +886,16 @@ _hex2int(char const * a, uint32_t len)
     }
   }
   
+    if (stringsNode) {
+        @try {
+            [self createStrings:stringsNode
+                        caption:(lastNodeCaption = @"Strings Parse")
+                       location:stringsNode.dataRange.location
+                         length:stringsNode.dataRange.length];
+        } @catch(NSException * exception) {
+            [self printException:exception caption:lastNodeCaption];
+        }
+    }
 
   //=========== Dynamic Symbol Table =============
   //==============================================
@@ -998,7 +1026,8 @@ _hex2int(char const * a, uint32_t len)
       [self createDataInCodeEntriesNode:dataInCodeEntriesNode
                                 caption:(lastNodeCaption = @"Dices")
                                location:dataInCodeEntriesNode.dataRange.location
-                                 length:dataInCodeEntriesNode.dataRange.length];
+                                 length:dataInCodeEntriesNode.dataRange.length
+                                is64Bit:YES];
     }
     @catch(NSException * exception)
     {
@@ -1306,13 +1335,7 @@ struct CompareSectionByName
     
     @try
     {
-        unsigned int value = section_64->flags & SECTION_TYPE;
-        char str[16] = {"__ustring"};
-        int comperValue = strcmp(section_64->sectname, str);
-        if (comperValue == 0) {
-            value = S_CSTRING_LITERALS;
-        }
-      switch (value)
+      switch (section_64->flags & SECTION_TYPE)
       {
         case S_CSTRING_LITERALS: 
           [self createCStringsNode:sectionNode 
@@ -1803,7 +1826,7 @@ struct CompareSectionByName
   NSString * lastNodeCaption;
   MVNode * sectionNode;
   struct section_64 const * section_64;
-  
+
   @try 
   {
     section_64 = [self findSection64ByName:"__class_list" andSegment:"__OBJC2"];
@@ -2494,7 +2517,7 @@ struct CompareSectionByName
   {
     [self printException:exception caption:rootNode.caption];
   }
-  
+    
   [super doMainTasks];
 }
 
@@ -2504,77 +2527,101 @@ struct CompareSectionByName
   NSBlockOperation * linkEditOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@"LinkEdit Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processLinkEdit]; else [self processLinkEdit64];
     }
+#if DEBUG
     NSLog(@"%@: LinkEdit finished parsing. (%lu symbols found)", self, 
-    [self is64bit] == NO ? symbols.size() : symbols_64.size());
+          [self is64bit] == NO ? symbols.size() : symbols_64.size());
+#endif
   }];
   
   NSBlockOperation * sectionRelocsOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@"Section relocations Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processSectionRelocs]; else [self processSectionRelocs64];
     }
+#if DEBUG
     NSLog(@"%@: Section relocations finished parsing.", self);
+#endif
   }];
-  
+
   NSBlockOperation * dyldInfoOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+       [dataController updateStatus:MVStatusTaskPendding :@"Dyld info  Parsing ..."];
     @autoreleasepool {
       [self processDyldInfo];
     }
+#if DEBUG
     NSLog(@"%@: Dyld info finished parsing.", self);
+#endif
   }];
-  
+
   NSBlockOperation * sectionOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@"Section contents Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processSections]; else [self processSections64];
     }
+#if DEBUG
     NSLog(@"%@: Section contents finished parsing.", self);
+#endif
   }];
-  
+
   NSBlockOperation * EHFramesOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@" Exception Frames Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processEHFrames]; else [self processEHFrames64];
     }
+#if DEBUG
     NSLog(@"%@: Exception Frames finished parsing.", self);
+#endif
   }];
-  
+
   NSBlockOperation * LSDAsOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@" Lang Spec Data Areas  Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processLSDA]; else [self processLSDA64];
     }
+#if DEBUG
     NSLog(@"%@: Lang Spec Data Areas finished parsing. (%lu LSDAs found)", self, lsdaInfo.size());
+#endif
   }];
-  
+
   NSBlockOperation * objcSectionOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@" ObjC Section contents  Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processObjcSections]; else [self processObjcSections64];
     }
+#if DEBUG
     NSLog(@"%@: ObjC Section contents finished parsing.", self);
+#endif
   }];
-  
+
   NSBlockOperation * codeSectionsOperation = [NSBlockOperation blockOperationWithBlock:^
   {
     if ([backgroundThread isCancelled]) return;
+      [dataController updateStatus:MVStatusTaskPendding :@" Code sections Parsing ..."];
     @autoreleasepool {
       if ([self is64bit] == NO) [self processCodeSections]; else [self processCodeSections64];
     }
+#if DEBUG
     NSLog(@"%@: Code sections finished parsing.", self);
+#endif
   }];
-  
-  // setup dependencies
+//
+//  // setup dependencies
   [sectionOperation       addDependency:linkEditOperation];
   [sectionRelocsOperation addDependency:sectionOperation];
   [dyldInfoOperation      addDependency:sectionRelocsOperation];
@@ -2592,14 +2639,16 @@ struct CompareSectionByName
 
   [dataController updateStatus:MVStatusTaskStarted];
   
-  [oq   addOperations:[NSArray arrayWithObjects:linkEditOperation,
+  [oq   addOperations:[NSArray arrayWithObjects:
+                       linkEditOperation,
                                                 sectionOperation,
                                                 sectionRelocsOperation,
                                                 dyldInfoOperation,
                                                 EHFramesOperation,
                                                 LSDAsOperation,
                                                 objcSectionOperation,
-                                                codeSectionsOperation,nil] 
+                                                codeSectionsOperation,
+                       nil]
     waitUntilFinished:YES];
   
   [super doBackgroundTasks];
