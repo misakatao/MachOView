@@ -91,6 +91,25 @@ using namespace std;
   return node;
 }
 
+- (BOOL)isChineseWithStr:(NSString *)str
+{
+    for(NSUInteger i = 0; i < [str length]; i++)
+    {
+        int a = [str characterAtIndex:i];
+        
+        if( a > 0x4e00 && a < 0x9fff)
+        {
+            return YES;
+        }
+        else
+        {
+            return NO;
+        }
+    }
+    return NO;
+}
+
+
 //-----------------------------------------------------------------------------
 -(MVNode *)createCStringsNode:(MVNode *)parent
                       caption:(NSString *)caption
@@ -102,14 +121,30 @@ using namespace std;
   
   NSRange range = NSMakeRange(location,0);
   NSString * lastReadHex;
-
+  // 解析数据
   while (NSMaxRange(range) < location + length)
   {
-    NSString * symbolName = [dataController read_string:range lastReadHex:&lastReadHex];
-    
+    NSString * symbolName = nil;
+    if ([node.userInfo[@"sectname"] isEqualToString:@"__ustring"]) {
+        // 根据地址和范围，解析value字符串        
+        symbolName = [dataController read_16string:range lastReadHex:&lastReadHex];
+    } else {
+        // 根据地址和范围，解析value字符串
+        symbolName = [dataController read_string:range lastReadHex:&lastReadHex];
+    }
+      NSUInteger len = 0;
+      if ([self isChineseWithStr:symbolName]) {
+          NSString *lenStr = [symbolName stringByReplacingOccurrencesOfString:@"\0" withString:@""];
+          len = [lenStr lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+      } else {
+          len = [symbolName length];
+      }
+      
+    // 把解析到的value，根据行存放
     [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                            :lastReadHex
-                           :[NSString stringWithFormat:@"CString (length:%lu)", [symbolName length]]
+//                           :[NSString stringWithFormat:@"CString (length:%lu)", len]
+                           :[NSString stringWithFormat:@"CString (iosLen:%lu)", len]
                            :symbolName];
     
     [node.details setAttributes:MVMetaDataAttributeName,symbolName,nil];
@@ -124,7 +159,11 @@ using namespace std;
     else
     {
       uint64_t rva64 = [self fileOffsetToRVA64:range.location];
-      [symbolNames setObject:[NSString stringWithFormat:@"0x%qX:\"%@\"", rva64, symbolName]
+        
+      // %qX:打印成大写的16进制
+      NSString *name = [NSString stringWithFormat:@"0x%qX:\"%@\"", rva64, symbolName];
+      // 新增一行数据
+      [symbolNames setObject:name
                       forKey:[NSNumber numberWithUnsignedLongLong:rva64]];
     }
   }

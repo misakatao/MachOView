@@ -163,7 +163,18 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
 //-----------------------------------------------------------------------------
 - (void)writeString:(NSString *)str toFile:(FILE *)pFile
 {
-  fwrite(CSTRING(str), [str length] + 1, 1, pFile);
+    if(str){
+        const char *s = [str cStringUsingEncoding:[NSString defaultCStringEncoding]];
+        const char *s1 = [str cStringUsingEncoding:NSUTF8StringEncoding];
+        char *s2 = NULL;
+//        if (strcmp(s, s2) == 0) {
+        if(s == NULL) {
+            fwrite(s1, [str length] + 1, 1, pFile);
+        } else {
+            fwrite(s, [str length] + 1, 1, pFile);
+        }
+      
+    }
 }
 
 //-----------------------------------------------------------------------------
@@ -1321,10 +1332,11 @@ NSString * const MVStatusTaskTerminated           = @"MVStatusTaskTerminated";
         }
         fclose(pFile);
 
-        for (id <MVSerializing> serializable in objectsToSave)
-        {
-          [serializable clear];
-        }
+          // 引起显示不完全的原因
+//        for (id <MVSerializing> serializable in objectsToSave)
+//        {
+//          [serializable clear];
+//        }
         
         // reset buffer
         objectsToSave = [[NSMutableArray alloc] init];
